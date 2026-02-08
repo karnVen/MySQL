@@ -1,15 +1,15 @@
 import 'dotenv/config'; 
 import mysql from 'mysql2/promise';
 
-async function main() {
+export async function main() {
     try {
         // 2. The Connection
         const db = await mysql.createConnection({
-            // We use .trim() to remove any accidental spaces from the .env file
-            host: process.env.DATABASE_HOST.trim(), 
-            user: process.env.DATABASE_USER.trim(),
-            password: process.env.DATABASE_PASSWORD.trim(),
-            database: process.env.DATABASE_NAME.trim()
+            // We use  to remove any accidental spaces from the .env file
+            host: process.env.DATABASE_HOST, 
+            user: process.env.DATABASE_USER,
+            password: process.env.DATABASE_PASSWORD,
+            database: process.env.DATABASE_NAME
         });
 
     
@@ -19,16 +19,20 @@ async function main() {
 
     const [rows]= await db.execute(`select * from users`);
 
+    const usernames = rows.map(user => user.username);
+    // console.log(usernames);
     
-    console.log(rows);
 
     // 3. Close
     await db.end();
+    return usernames;
 
     } catch (err) {
         console.log("❌ ERROR:");
         console.log(err.message);
+        return [];
     }
 }
 
 main();
+
