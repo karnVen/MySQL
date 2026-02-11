@@ -11,6 +11,4 @@ async function start() {
 
 
 const users= await start();
-console.log(users);
-
 
