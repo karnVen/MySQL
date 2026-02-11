@@ -2,8 +2,8 @@ import 'dotenv/config';
 import mysql from 'mysql2/promise';
 import fs from 'fs';
 import csv from 'csv-parser';
+import moment from 'moment'; // <--- New Import
 
-// 1. Configuration
 const CSV_FILENAME = 'pomodoro.csv';
 
 async function uploadCsv() {
@@ -20,10 +20,33 @@ async function uploadCsv() {
     console.log("2. Reading CSV file...");
     const results = [];
 
+    // --- HELPER: Cleans messy dates ---
+    const formatForMySQL = (dateStr) => {
+        if (!dateStr) return null;
+
+        // We tell moment to try ALL these patterns. 
+        // It will use the first one that matches your data.
+        const possibleFormats = [
+            'DD-MM-YYYY HH:mm',      // Your top rows (e.g. 10-07-2025 00:22)
+            'MM/DD/YYYY hh:mm A',    // Your middle rows (e.g. 12/28/2025 10:29 PM)
+            'YYYY-MM-DD HH:mm:ss',   // Standard SQL (just in case)
+            'MM/DD/YYYY HH:mm'       // Fallback
+        ];
+
+        const m = moment(dateStr, possibleFormats);
+
+        if (m.isValid()) {
+            return m.format('YYYY-MM-DD HH:mm:ss'); // Convert to MySQL standard
+        } else {
+            console.log(`⚠️ Warning: Could not parse date "${dateStr}"`);
+            return null; // Return null so DB doesn't crash
+        }
+    };
+    // ----------------------------------
+
     fs.createReadStream(CSV_FILENAME)
         .pipe(csv({
-            // FIX: This function removes invisible BOM characters from headers
-            mapHeaders: ({ header }) => header.trim().replace(/^\ufeff/, '')
+            mapHeaders: ({ header }) => header.trim().replace(/^\ufeff/, '') 
         }))
         .on('data', (data) => results.push(data))
         .on('end', async () => {
@@ -34,9 +57,11 @@ async function uploadCsv() {
 
             for (const row of results) {
                 try {
-                    // 1. Clean up Empty Dates (Excel often leaves them as empty strings)
-                    // If "To" is empty, we set it to NULL instead of ""
-                    const endTime = row['To'] === '' ? null : row['To'];
+                    // Use our new helper function to clean the dates
+                    const startTime = formatForMySQL(row['From']);
+                    const endTime = formatForMySQL(row['To']);
+                    
+                    // Clean duration (handle empty strings)
                     const duration = row['Duration'] === '' ? null : row['Duration'];
 
                     const sql = `
@@ -47,9 +72,9 @@ async function uploadCsv() {
                     const values = [
                         row['ID'],          
                         row['Tag'],         
-                        row['From'],        
-                        endTime,   // Use the cleaned variable
-                        duration,  // Use the cleaned variable
+                        startTime,  // Cleaned Date
+                        endTime,    // Cleaned Date
+                        duration,
                         row['Loops']        
                     ];
 
@@ -58,10 +83,7 @@ async function uploadCsv() {
                     successCount++;
 
                 } catch (err) {
-                    // Detailed error logging to help you debug
-                    console.log(`\n❌ Error on Row ID ${row['ID'] || 'Unknown'}:`);
-                    console.log(`   Message: ${err.message}`);
-                    console.log(`   Data: ${JSON.stringify(row)}`); // Shows exactly what Excel sent
+                    console.log(`\n❌ Error on Row ID ${row['ID']}: ${err.message}`);
                     errorCount++;
                 }
             }
@@ -72,7 +94,6 @@ async function uploadCsv() {
             console.log(`Failed: ${errorCount}`);
             console.log("------------------------------------------------");
 
-            // Add the COMMIT just to be safe (some setups require it)
             await db.execute('COMMIT');
             await db.end();
         });
